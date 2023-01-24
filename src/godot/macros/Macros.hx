@@ -23,7 +23,6 @@ class Macros {
     inline public static var METHOD_FLAG_STATIC     = 1 << 5;
     inline public static var METHOD_FLAGS_DEFAULT   = METHOD_FLAG_NORMAL;
 
-    //static var virtuals:Map<String, haxe.macro.Field> = new Map();
     static var extensionClasses:Map<String, Bool> = new Map();
 
     macro static public function build():Array<haxe.macro.Field> {
@@ -92,10 +91,13 @@ class Macros {
         var extensionFields = [];
         //var extensionIntegerConstants = [];
         var extensionProperties = [];
+        var staticInits = [];
+        var staticsToRewriteForInit = [];
         var virtualFields = new Map<String, haxe.macro.Field>();   
 
         for (field in fields) {
             var isExported = false;
+            var isStatic = field.access.indexOf(AStatic) != -1;
 
             for (fmeta in field.meta)
                 if (fmeta.name == ":export")
@@ -111,16 +113,24 @@ class Macros {
                         extensionProperties.push(field);
 
                 case FVar(_t, _e): {
+                    // only deal with static variables or actual useful and correctly declared ones
                     if (_t == null && _e == null) continue; // safe case for us, let the compiler complain about this ;)
 
                     var ft = _t != null ? Context.follow(ComplexTypeTools.toType(_t)) : Context.typeof(_e);
 
                     // TODO: allow for normal and static initialization of Godot classes.
                     // add a compiler warning to make people aware                    
-                    if (!isEngineClass && _e != null) {
+                    if (isStatic && !isEngineClass && _e != null) {
                         function _checkGodotType(_gt) {
-                            if (_gt.pack[0] == "godot" && !TypeMacros.isACustomBuiltIn(_gt.name))
-                                Context.fatalError('${field.name}:${_gt.name}: We don\'t support class level initialization of Godot classes yet!', Context.currentPos());
+
+                            // TODO: go up the inheritance chain for the type to see if we hit an engine class. If yes, we need a static initializer
+                            
+                            if (_gt.pack[0] == "godot" && !TypeMacros.isACustomBuiltIn(_gt.name)) {
+                                // TODO: keep this error around for
+                                //Context.fatalError('${field.name}:${_gt.name}: We don\'t support class level initialization of Godot classes yet!', Context.currentPos());
+                                staticInits.push(macro $i{field.name} = $_e);
+                                staticsToRewriteForInit.push(field);
+                            }
                         }
                         switch (ft) {
                             case TInst(t, _): _checkGodotType(t.get());
@@ -185,6 +195,23 @@ class Macros {
             }
         }
 
+        // rewrite the static godt vars and add the expr to the classes __static_init() function
+        for (f in staticsToRewriteForInit) {
+            var res = fields.remove(f);
+            if (res != null) {
+                switch (f.kind) {
+                    case FVar(_path, _expr): {
+                        if (_path == null) // in case where we have no type on the var, grab it from the expression
+                            _path = TypeTools.toComplexType(Context.typeof(_expr));
+                        f.kind = FVar(_path, null);
+                        fields.push(f);
+                    }
+                    default: throw "Error, what did we just try to remove?!";
+                }
+            }
+        }
+        staticsToRewriteForInit = null;
+
         // find the first engine-class up the inheritance chain
         var engine_parent = null;
         // count the depth of the inheritance chain. we need it later to register all classes in the correct order
@@ -192,15 +219,18 @@ class Macros {
         // also collect all engine virtuals up the chain
         var engineVirtuals = [];
         var next = cls.get().superClass.t.get();
+
+        // we only must collect all virtuals that belong to engine classes
         while (next != null) {
-            if (engine_parent == null && next.meta.has(":gdEngineClass")) {
+            var nextIsEngineClass = next.meta.has(":gdEngineClass");
+            if (engine_parent == null && nextIsEngineClass) {
                 engine_parent = next;
             }
             
             // TODO: this can be slow?
             for (k=>v in virtualFields) {
                 for (f in next.fields.get())
-                    if (f.name == k)
+                    if (nextIsEngineClass && f.name == k)
                         engineVirtuals.push(v);
             }
 
@@ -209,7 +239,7 @@ class Macros {
         }
 
         if (!isEngineClass && engine_parent == null)
-            throw "Impossible";        
+            throw "Impossible";
 
         if (isEngineClass) {
             // properly bootstrap this class
@@ -232,7 +262,8 @@ class Macros {
                 extensionFields,
                 engineVirtuals,
                 classNameCpp,
-                extensionProperties
+                extensionProperties,
+                staticInits
             );
 
             // properly bootstrap this class
@@ -257,19 +288,23 @@ class Macros {
         _extensionFields:Array<haxe.macro.Field>,
         _virtualFields:Array<Dynamic>,
         _cppClassName:String, 
-        _extensionProperties:Array<haxe.macro.Field>) 
+        _extensionProperties:Array<haxe.macro.Field>,
+        _staticInits:Array<haxe.macro.Expr>) 
     {
         var pos = Context.currentPos();
         var ctType = TPath(_typePath);
 
+        // TODO: move this out of here
         function _mapHxTypeToGodot(_type) {
             return _type != null ? switch(_type) {
                 case TPath(_d):
+                    godot.Types.GDExtensionVariantType.fromString(_d.name);
+                    /* TODO: keep this a bit for testing / reviewing
                     switch(_d.name) {
                         case 'Bool': godot.Types.GDExtensionVariantType.BOOL;
-                        case 'Color': godot.Types.GDExtensionVariantType.COLOR;
                         case 'Int', 'Int64': godot.Types.GDExtensionVariantType.INT;
                         case 'Float': godot.Types.GDExtensionVariantType.FLOAT;
+                        case 'Color': godot.Types.GDExtensionVariantType.COLOR;
                         case 'Plane': godot.Types.GDExtensionVariantType.PLANE;
                         case 'Rect2': godot.Types.GDExtensionVariantType.RECT2;
                         case 'Rect2i': godot.Types.GDExtensionVariantType.RECT2I;
@@ -281,8 +316,11 @@ class Macros {
                         case 'Vector3i': godot.Types.GDExtensionVariantType.VECTOR3I;
                         case 'Vector4': godot.Types.GDExtensionVariantType.VECTOR4;
                         case 'Vector4i': godot.Types.GDExtensionVariantType.VECTOR4I;
+                        case 'PackedByteArray': godot.Types.GDExtensionVariantType.PACKED_BYTE_ARRAY;
+                        case 'PackedFloat32Array': godot.Types.GDExtensionVariantType.PACKED_FLOAT32_ARRAY;
                         default: godot.Types.GDExtensionVariantType.NIL;
                     }
+                    */
                 default: godot.Types.GDExtensionVariantType.NIL;
             } : godot.Types.GDExtensionVariantType.NIL;
         }
@@ -295,12 +333,21 @@ class Macros {
         for (field in _extensionProperties) {
             switch(field.kind) {
                 case FProp(_g, _s, _type, _expr): {
-                    //trace("////////////////////////////////////////////////////////////////////////////////");
+                    // trace("////////////////////////////////////////////////////////////////////////////////");
                     // trace('// FProp: ${field.name}');
-                    // trace(field);
-                    //trace(_g);
-                    //trace(_s);
-                    //trace(_type);
+                    // trace('// FProp: ${field}');
+
+                    // make sure we deal with missing types on the declaration and grab it from the expr.
+                    if (_type == null) {
+                        if (_expr == null) 
+                            Context.fatalError('Error: ${_className}.${field.name}: Your property needs to specify either a type or have an assignment!', Context.currentPos());
+                        // unwrap StdTypes
+                        _type =  TypeTools.toComplexType(Context.typeof(_expr));
+                        _type = switch (_type) {
+                            case TPath(_t): _t.name == "StdTypes" ? TPath({name: _t.sub, params:[], pack: []}) : _type;
+                            default: _type;
+                        }
+                    }
                     
                     var argType = _mapHxTypeToGodot(_type);
                     var hint = macro $v{godot.GlobalConstants.PropertyHint.PROPERTY_HINT_NONE};
@@ -423,8 +470,6 @@ class Macros {
                     
                 }
                 case FVar(_t, _e): { // signals
-                    //trace(_t);
-                    //trace(_e);
 
                     var hint = macro $v{godot.GlobalConstants.PropertyHint.PROPERTY_HINT_NONE};
                     var hint_string = macro $v{""};
@@ -466,9 +511,6 @@ class Macros {
                         var arg = arguments[i];
                         var argType = _mapHxTypeToGodot(arg.type);
                         var argTypeString = godot.Types.GDExtensionVariantType.toString(argType);
-
-                        // trace(arg);
-                        // trace(argTypeString);
 
                         regSigs.push(macro {
                             var aNamePtr:godot.Types.GDExtensionStringNamePtr = ($v{'${arg.name}'}:godot.variant.StringName).native_ptr();
@@ -530,7 +572,6 @@ class Macros {
                     // trace("////////////////////////////////////////////////////////////////////////////////");
                     // trace('// FFun: ${field.name}');
                     
-                    // trace(_f);
                     var argExprs = [];
                     var argVariantExprs = [];
                     var retAndArgsInfos = [];
@@ -658,9 +699,6 @@ class Macros {
 
                         var fname:godot.variant.StringName = $v{field.name};
 
-                        // TODO: Remove
-                        //trace("registering " + $v{field.name});
-
                         var method_info:godot.Types.GDExtensionClassMethodInfo = untyped __cpp__('{
                             {0}, // GDExtensionStringNamePtr name;
                             (void *){1}, // void *method_userdata;
@@ -719,10 +757,6 @@ class Macros {
         }
 
         // build callbacks and implementations for the virtuals 
-        //trace("////////////////////////////////////////////////////////////////////////////////");
-        //trace('// Virtuals');
-        //trace("////////////////////////////////////////////////////////////////////////////////");
-
         var vCallbacks = '';
         var virtualFuncCallbacks = [];
         var virtualFuncImpls = [];
@@ -741,8 +775,6 @@ class Macros {
 
             var vname = 'virtual_${_className}_${f.name}';
             virtualFuncCallbacks.push(macro {
-                //var vr = godot.variant.StringName.fromGDString(($v{f.name}:godot.variant.GDString));
-                //rname = vr;
                 var hs = lname.hash();
                 if (haxe.Int32.ucompare(hs, $v{djb2(f.name)}) == 0) 
                     return untyped __cpp__($v{"(void *)(GDExtensionClassCallVirtual)&"+vname+"__onVirtualCall"});
@@ -879,7 +911,6 @@ class Macros {
                 var rname;
 
                 $b{virtualFuncCallbacks};
-                //return untyped __cpp__('${vname}__onVirtualCall
                 return untyped __cpp__('nullptr'); // should never happen
             }
             
@@ -926,10 +957,16 @@ class Macros {
 
             static function __registerMethods() {
                 var library = untyped __cpp__("godot::internal::library");
+                
                 // register all methods
                 $b{regOut};
+
                 // getter and setters have been registered, now register the properties
                 $b{regPropOut};
+            }
+
+            static function __static_init() {
+                $b{_staticInits};
             }
 
             static function __bindCall(
@@ -946,13 +983,6 @@ class Macros {
                         _instance
                     );
                 $b{bindCalls};
-                /*
-                const MethodBind *bind = reinterpret_cast<const MethodBind *>(p_method_userdata);
-                Variant ret = bind->call(p_instance, p_args, p_argument_count, *r_error);
-                // This assumes the return value is an empty Variant, so it doesn't need to call the destructor first.
-                // Since only NativeExtensionMethodBind calls this from the Godot side, it should always be the case.
-                internal::gdn_interface->variant_new_copy(r_return, ret._native_ptr());
-                */
             }
 
             static function __bindCallPtr(
@@ -966,9 +996,7 @@ class Macros {
                         $v{"::godot::Wrapped( (hx::Object*)(((cpp::utils::RootedObject*){0})->getObject()) )"}, // TODO: this is a little hacky!
                         _instance
                     );
-                $b{bindCallPtrs};
-                //const MethodBind *bind = reinterpret_cast<const MethodBind *>(p_method_userdata);
-                //bind->ptrcall(p_instance, p_args, r_return);        
+                $b{bindCallPtrs};   
             }
         }
         return _fields.concat(fieldBindingsClass.fields.concat(virtualFuncImpls));

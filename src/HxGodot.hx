@@ -55,7 +55,8 @@ class HxGodot {
                 GodotNativeInterface.print_error(lines.join('\n'), infos.className+":"+infos.methodName, infos.fileName, infos.lineNumber);
             } else {
                 //GodotNativeInterface.print_warning(Std.string(v), infos.className+":"+infos.methodName, infos.fileName, infos.lineNumber);
-                GDUtils.print((Std.string(v):godot.variant.GDString));
+                var msg = infos.fileName+":"+infos.lineNumber+": "+ Std.string(v);
+                GDUtils.print((msg:godot.variant.GDString));
             }
         }
 
@@ -69,6 +70,7 @@ class HxGodot {
             return 0;
         });
 
+        // now init the binding classes and register the extension classes
         for (t in tmp) {
             if (Reflect.hasField(t, "__init_engine_bindings")) // engine class bindings
                 Reflect.field(t, "__init_engine_bindings")();
@@ -78,6 +80,9 @@ class HxGodot {
 
             if (Reflect.hasField(t, "__registerClass")) // extension class bindings
                 Reflect.field(t, "__registerClass")();
+
+            if (Reflect.hasField(t, "__static_init")) // extension static initialization
+                Reflect.field(t, "__static_init")();
         }
 
         //trace(CompileTime.buildGitCommitSha());
