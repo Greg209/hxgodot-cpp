@@ -113,7 +113,7 @@ abstract Variant(__Variant) from __Variant to __Variant {
     }
 
     @:noCompletion
-    inline public static function _buildVariant2(_type:GDExtensionVariantType, _x:GDExtensionTypePtr):Variant {
+    inline public static function _buildVariant2(_type:GDExtensionVariantType, _y:GDExtensionTypePtr):Variant {
         var res = new Variant();
         var constructor = __Variant.from_type_constructor.get(_type);
 
@@ -122,7 +122,22 @@ abstract Variant(__Variant) from __Variant to __Variant {
             ', 
             constructor, 
             res.native_ptr(), 
-            _x
+            _y
+        );
+
+        return res;
+    } 
+
+    @:noCompletion
+    inline public static function _buildVariantObject(_type:GDExtensionVariantType, _y:GDExtensionTypePtr):Variant {
+        var res = new Variant();
+        var constructor = __Variant.from_type_constructor.get(_type);
+        untyped __cpp__('
+            ((GDExtensionVariantFromTypeConstructorFunc){0})({1}, {2});
+            ', 
+            constructor, 
+            res.native_ptr(),
+            untyped __cpp__('&{0}', _y)
         );
         return res;
     }    

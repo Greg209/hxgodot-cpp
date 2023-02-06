@@ -224,37 +224,41 @@ class ClassGenMacros {
                                 isAllowed = false;
                                 break;
                             }
+                            var defValExpr = null;
+                            var argType = TypeMacros.getTypeName(a.type);
+                            var argPack = TypeMacros.getTypePackage(argType);
+
                             if (TypeMacros.isEnumOrBitfield(a.type)) {
                                 var tokens = a.type.split(".");
-                                var argType = "cpp.Int32";
-                                var argPack = [];
-                                args.push({
-                                    name: ArgumentMacros.guardAgainstKeywords(a.name),
-                                    type: {name:argType , pack:argPack}
-                                }); 
-                            } else {
+                                argType = "cpp.Int32";
+                                argPack = [];
+                            }
 
-                                //var argType = TypeMacros.getTypeName(a.meta != null ? a.meta : a.type);
-                                var argType = TypeMacros.getTypeName(a.type);
-                                var argPack = TypeMacros.getTypePackage(argType);
-
-                                // deal with the proper default value and parse it into an expression
-                                var defVal:String = a.default_value;
-                                var defValExpr = null;
-                                if (defVal != null) {
-                                    //defVal = defVal.replace("&", "");
-                                    if (TypeMacros.isTypeNative(argType)) {
-                                        defVal = ArgumentMacros.prepareArgumentDefaultValue(argType, defVal);
-                                        defValExpr = Context.parse(defVal, Context.currentPos());
-                                    }
-                                } 
-                                args.push({
-                                    name: ArgumentMacros.guardAgainstKeywords(a.name),
-                                    type: {name:argType , pack:argPack},
-                                    defaultValue: defValExpr
-                                });    
-                            }                        
+                            // deal with the proper default value and parse it into an expression
+                            var defVal:String = a.default_value;
+                            if (defVal != null) {
+                                if (TypeMacros.isTypeNative(argType)) {
+                                    defVal = ArgumentMacros.prepareArgumentDefaultValue(argType, defVal);
+                                    defValExpr = Context.parse(defVal, Context.currentPos());
+                                }
+                            } 
+                            args.push({
+                                name: ArgumentMacros.guardAgainstKeywords(a.name),
+                                type: {name:argType , pack:argPack},
+                                defaultValue: defValExpr
+                            }); 
                         }
+                    }
+
+                    // deal with varargs
+                    var hasVarArg = false;
+                    if (m.is_vararg != null && m.is_vararg == true) {
+                        args.push({
+                            name: "vararg",
+                            type: {name:"Rest", params:[TPType(macro : godot.variant.Variant)], pack:["haxe"]},
+                            isVarArg: true
+                        });
+                        hasVarArg = true;
                     }
 
                     if (!isAllowed) {
@@ -311,6 +315,7 @@ class ClassGenMacros {
                             returnType: {name:retType , pack:retPack},
                             access: access,
                             arguments: args,
+                            hasVarArg: hasVarArg,
                             macros: {
                                 field: null,
                                 fieldSetter: null
@@ -325,6 +330,7 @@ class ClassGenMacros {
                             returnType: {name:retType , pack:retPack},
                             access: access,
                             arguments: args,
+                            hasVarArg: hasVarArg,
                             macros: {
                                 field: (macro class {@:noCompletion public static var $mname:godot.Types.GDExtensionPtrBuiltInMethod;}).fields[0],
                                 fieldSetter: [
@@ -823,7 +829,7 @@ class ClassGenMacros {
                 if (m.is_vararg != null && m.is_vararg == true) {
                     args.push({
                         name: "vararg",
-                        type: {name:"Rest", params:[TPType(macro : Dynamic)], pack:["haxe"]},
+                        type: {name:"Rest", params:[TPType(macro : godot.variant.Variant)], pack:["haxe"]},
                         isVarArg: true
                     });
                     hasVarArg = true;
@@ -873,6 +879,9 @@ class ClassGenMacros {
 
             // operators
             if (b.operators != null) {
+                // make sure we add variant operators last! so collect them here and add the last
+                var variantOperatorBinds = [];
+
                 for (o in cast(b.operators, Array<Dynamic>)) {
                     if (!TypeMacros.isTypeAllowed(o.return_type))
                         continue;
@@ -914,7 +923,7 @@ class ClassGenMacros {
                     }
 
                     var oname = '_operator_${opName}_${o.right_type}';
-                    binds.push({
+                    var bind:FunctionBind = {
                         clazz: clazz,
                         name: 'operator_${opName}_${o.right_type}',
                         type: FunctionBindType.OPERATOR,
@@ -928,8 +937,15 @@ class ClassGenMacros {
                             ],
                             extra: TypeMacros.getOpHaxe(opType)
                         }
-                    });
+                    };
+
+                    if (o.right_type == "Variant")
+                        variantOperatorBinds.push(bind);
+                    else
+                        binds.push(bind);
                 }
+
+                binds = binds.concat(variantOperatorBinds);
             }
 
             // indexing
@@ -1086,8 +1102,8 @@ class ClassGenMacros {
                 inline public static var $sizeName = $v{sizeValue};
             };
             abstrct.kind = TDAbstract(typePathComplex, [typePathComplex], [typePathComplex]);
-            abstrct.fields = abstrct.fields.concat(abstractFields);
             abstrct.fields = abstrct.fields.concat(ClassGenExtraMacros.getHaxeOperators(abstractName));
+            abstrct.fields = abstrct.fields.concat(abstractFields);
             abstrct.meta = [{
                 name: ":forward",
                 params: [],
@@ -1155,7 +1171,7 @@ class ClassGenMacros {
             if (m.is_vararg != null && m.is_vararg == true) {
                 args.push({
                     name: "vararg",
-                    type: {name:"Rest", params:[TPType(macro : Dynamic)], pack:["haxe"]},
+                    type: {name:"Rest", params:[TPType(macro : godot.variant.Variant)], pack:["haxe"]},
                     isVarArg: true
                 });
                 hasVarArg = true;
