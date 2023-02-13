@@ -17,14 +17,26 @@ class HxGodot {
     static var gcCycle = 0.0;
     public static function runGc(_dt:Float) {
         var ran = false;
-        if (gcCycle > 1) {
-            
+        if (gcCycle > 1) {            
             cpp.NativeGc.run(true);
             gcCycle = 0;
             ran = true;
         }
         gcCycle += _dt;
         return ran;
+    }
+
+    public static function getExceptionStackString(_e:Dynamic) {
+        var msg = [_e.value];
+        for (s in cast(_e.__nativeStack, Array<Dynamic>)) {
+            var tokens = s.split("::");
+            var cls = tokens[0];
+            var func = tokens[1];
+            var file = tokens[2];
+            var line = tokens[3];
+            msg.push('Called from $cls.$func ($file:$line)');
+        }
+        return msg.join("\n");
     }
 
     static function main() {
@@ -52,7 +64,7 @@ class HxGodot {
                 lines.reverse();
                 lines.pop();
                 lines.unshift(Std.string(v));
-                GodotNativeInterface.print_error(lines.join('\n'), infos.className+":"+infos.methodName, infos.fileName, infos.lineNumber);
+                GodotNativeInterface.print_error(lines.join('\n'), infos.className+":"+infos.methodName, infos.fileName, infos.lineNumber, true);
             } else {
                 //GodotNativeInterface.print_warning(Std.string(v), infos.className+":"+infos.methodName, infos.fileName, infos.lineNumber);
                 var msg = infos.fileName+":"+infos.lineNumber+": "+ Std.string(v);

@@ -351,7 +351,7 @@ typedef GDExtensionPropertyInfoPtr = cpp.Star<GDExtensionPropertyInfo>;
 typedef GDExtensionInt = cpp.Int64;
 typedef GDExtensionBool = cpp.UInt8;
 typedef GDExtensionFloat = cpp.Float32; // TODO: take into account if godot was compiled for doubles
-typedef GDObjectInstanceID = cpp.Int64;
+typedef GDObjectInstanceID = cpp.UInt64;
 
 // simple extern to work with the static functions of the native interface and proper typing
 @:include("godot_cpp/godot.hpp")
@@ -361,10 +361,10 @@ extern class GodotNativeInterface {
     public static function mem_free(_ptr:VoidPtr):Void;
 
     @:native("godot::internal::gde_interface->print_error")
-    public static function print_error(_m:String, _function:String, _file:String, _line:Int):Void;
+    public static function print_error(_m:String, _function:String, _file:String, _line:Int, _editor_notify:Bool):Void;
 
     @:native("godot::internal::gde_interface->print_warning")
-    public static function print_warning(_m:String, _function:String, _file:String, _line:Int):Void;
+    public static function print_warning(_m:String, _function:String, _file:String, _line:Int, _editor_notify:Bool):Void;
     
     @:native("godot::internal::gde_interface->classdb_construct_object")
     public static function classdb_construct_object(_class:GDExtensionStringNamePtr):GDExtensionObjectPtr;
@@ -484,6 +484,10 @@ extern class GodotNativeInterface {
         return untyped __cpp__('godot::internal::gde_interface->variant_can_convert_strict((GDExtensionVariantType){0}, (GDExtensionVariantType){1})', _from, _to);
     }
 
+    inline public static function variant_stringify(_self:GDExtensionVariantPtr, _ret:GDExtensionStringPtr):Bool {
+        return untyped __cpp__('godot::internal::gde_interface->variant_stringify({0}, {1})', _self, _ret);
+    }
+
     @:native("godot::internal::gde_interface->variant_get_type")
     public static function variant_get_type(_ptr0:GDExtensionVariantPtr):GDExtensionVariantType;
 
@@ -498,6 +502,12 @@ extern class GodotNativeInterface {
 
     @:native("godot::internal::gde_interface->object_cast_to")
     public static function object_cast_to(_obj:GDExtensionObjectPtr, _tag:VoidPtr):GDExtensionObjectPtr;
+
+    @:native("godot::internal::gde_interface->object_get_instance_from_id")
+    public static function object_get_instance_from_id(_id:GDObjectInstanceID):GDExtensionObjectPtr;
+
+    @:native("godot::internal::gde_interface->object_get_instance_id")
+    public static function object_get_instance_id(_obj:GDExtensionObjectPtr):GDObjectInstanceID;
 
     @:native("godot::internal::gde_interface->global_get_singleton")
     public static function global_get_singleton(_classname:GDExtensionStringNamePtr):GDExtensionObjectPtr;
